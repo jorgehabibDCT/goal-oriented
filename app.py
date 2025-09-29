@@ -138,39 +138,54 @@ def predict_row(home, away, df, draw_bias=0.1):
     s_diff = (a["S"] - b["S"])
     o_vs_d_edge = (a["O"] - b["D"]) - (b["O"] - a["D"])  # how each attack matches the other's defense
 
-    # 1X2 lean
-    if s_diff > 0.25 + draw_bias:
+    # 1X2 lean - improved logic for clear mismatches
+    if s_diff > 0.5:  # Clear home advantage
         outcome = f"{a['Club']} win"
-    elif s_diff < -0.25 - draw_bias:
+    elif s_diff < -0.5:  # Clear away advantage
+        outcome = f"{b['Club']} win"
+    elif s_diff > 0.25 + draw_bias:  # Slight home advantage
+        outcome = f"{a['Club']} win"
+    elif s_diff < -0.25 - draw_bias:  # Slight away advantage
         outcome = f"{b['Club']} win"
     else:
         outcome = "Draw"
 
-    # goals market
-    # expected goals proxy using simple matchup mean
-    exp_home = max(0.1, (a["O"] + max(0.2, 2.0 - b["D"])) / 2.8)
-    exp_away = max(0.1, (b["O"] + max(0.2, 2.0 - a["D"])) / 2.8)
+    # goals market - improved expected goals calculation
+    # Home advantage factor
+    home_advantage = 0.1
+    
+    # Expected goals based on attack vs defense matchup
+    exp_home = max(0.5, a["O"] * (2.0 - b["D"]) + home_advantage)
+    exp_away = max(0.3, b["O"] * (2.0 - a["D"]))
     gsum = exp_home + exp_away
 
-    if gsum >= 2.6:
+    if gsum >= 3.0:
         goals = "Over 2.5"
-    elif gsum <= 2.2:
+    elif gsum <= 2.0:
         goals = "Under 2.5"
     else:
         goals = "Lean Over 2.5"
 
-    # BTTS heuristic
-    btts = "Yes" if (a["O"] > 1.1 and b["O"] > 0.9) or (a["D"] > 1.3 or b["D"] > 1.3) else "No/Lean No"
+    # BTTS logic - more realistic
+    home_scores = exp_home > 0.8
+    away_scores = exp_away > 0.8
+    btts = "Yes" if home_scores and away_scores else "No/Lean No"
 
-    # score ranges (very rough)
-    def rng(x):
-        if x < 0.6: return [0,1]
-        if x < 1.2: return [1,2]
-        if x < 1.8: return [1,3]
-        return [2,4]
+    # Score ranges based on expected goals
+    def score_range(exp_goals):
+        if exp_goals < 0.8: return [0, 1]
+        elif exp_goals < 1.5: return [1, 2]
+        elif exp_goals < 2.2: return [1, 3]
+        else: return [2, 4]
 
-    hr = rng(exp_home)
-    ar = rng(exp_away)
+    hr = score_range(exp_home)
+    ar = score_range(exp_away)
+    
+    # Ensure score ranges make sense with predictions
+    if goals == "Under 2.5":
+        hr = [min(hr[0], 1), min(hr[1], 2)]
+        ar = [min(ar[0], 1), min(ar[1], 2)]
+    
     score_hint = f"{hr[0]}–{ar[0]} .. {hr[1]}–{ar[1]}"
 
     return {
