@@ -4,7 +4,7 @@ import streamlit as st
 import requests
 from datetime import datetime, timezone
 
-st.set_page_config(page_title="Matchup Predictor", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Goalflux", page_icon="⚽", layout="wide")
 
 # ESPN API for football standings
 ESPN_BASE = "https://site.api.espn.com/apis/v2/sports"
@@ -189,7 +189,8 @@ def compute_table(raw):
     return df
 
 # ---------- UI ----------
-st.title("⚽ Tier-based Matchup Predictor")
+st.title("⚽ Goalflux")
+st.markdown("**Intelligent Football Matchup Predictor** - Analyze team tiers, predict outcomes, and discover betting insights")
 
 with st.expander("1) Fetch League Standings", expanded=True):
     st.markdown("**Choose a league to automatically fetch current standings:**")
