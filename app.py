@@ -208,19 +208,27 @@ with st.expander("1) Fetch League Standings", expanded=True):
             
         if df is not None:
             df = compute_table(df)
+            # Store in session state to persist across reruns
+            st.session_state.standings_df = df
+            st.session_state.league_name = league_name
             st.success(f"✅ {league_name} standings loaded successfully!")
             st.dataframe(df.sort_values("S", ascending=False), width='stretch')
         else:
             st.error("Failed to fetch standings. Please try again.")
     
+    # Display standings if already loaded
+    if 'standings_df' in st.session_state:
+        st.success(f"✅ {st.session_state.league_name} standings loaded!")
+        st.dataframe(st.session_state.standings_df.sort_values("S", ascending=False), width='stretch')
+    
 
 with st.expander("2) Enter fixtures", expanded=True):
     st.markdown("**Choose teams to create fixtures:**")
     
-    # Check if we have standings data
-    if 'df' in locals() and df is not None:
+    # Check if we have standings data in session state
+    if 'standings_df' in st.session_state and st.session_state.standings_df is not None:
         # Get team names from the standings data
-        team_names = sorted(df['Club'].tolist())
+        team_names = sorted(st.session_state.standings_df['Club'].tolist())
         
         # Create two columns for team selection
         col1, col2, col3 = st.columns([1, 1, 1])
@@ -281,7 +289,7 @@ st.markdown("---")
 st.subheader("Predictions")
 
 # Check if we have standings data
-if 'df' not in locals():
+if 'standings_df' not in st.session_state:
     st.warning("⚠️ Please fetch standings data first before making predictions.")
     st.stop()
 
@@ -289,7 +297,7 @@ rows = []
 missing = []
 for h, a in fixtures:
     try:
-        rows.append(predict_row(h, a, df))
+        rows.append(predict_row(h, a, st.session_state.standings_df))
     except Exception:
         missing.append(f"{h} vs {a}")
 
