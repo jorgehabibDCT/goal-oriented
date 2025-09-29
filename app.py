@@ -171,10 +171,22 @@ def predict_row(home, away, df, draw_bias=0.1):
     else:
         goals = "Lean Over 2.5"
 
-    # BTTS logic - more realistic
-    home_scores = exp_home > 0.8
-    away_scores = exp_away > 0.8
-    btts = "Yes" if home_scores and away_scores else "No/Lean No"
+    # BTTS logic - more nuanced and consistent with goals prediction
+    # Lower thresholds to be more realistic with our aggressive expected goals
+    home_scores_strong = exp_home > 1.0
+    away_scores_strong = exp_away > 1.0
+    home_scores_weak = exp_home > 0.6
+    away_scores_weak = exp_away > 0.6
+    
+    # More nuanced BTTS prediction
+    if home_scores_strong and away_scores_strong:
+        btts = "Yes"
+    elif home_scores_weak and away_scores_weak:
+        btts = "Lean Yes"
+    elif (home_scores_strong and away_scores_weak) or (home_scores_weak and away_scores_strong):
+        btts = "Lean No"
+    else:
+        btts = "No"
 
     # Score prediction - show actual likely scores with variety
     def get_score_predictions(exp_home, exp_away, is_over_25):
