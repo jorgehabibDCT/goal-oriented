@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 st.set_page_config(page_title="Matchup Predictor", page_icon="⚽", layout="wide")
 
@@ -41,7 +41,7 @@ def fetch_league_standings(league_name, season=None):
     """Fetch standings for a specific league using ESPN API."""
     try:
         if season is None:
-            season = datetime.utcnow().year
+            season = datetime.now(timezone.utc).year
             
         league_code = AVAILABLE_LEAGUES.get(league_name)
         if not league_code:
@@ -199,7 +199,7 @@ with st.expander("1) Select League and Season", expanded=True):
     selected_league = st.selectbox("Select League:", list(AVAILABLE_LEAGUES.keys()))
     
     # Season selection
-    current_year = datetime.utcnow().year
+    current_year = datetime.now(timezone.utc).year
     season = st.number_input("Season:", min_value=2020, max_value=current_year+1, value=current_year)
     
     # Fetch standings button
@@ -257,8 +257,61 @@ Girona,5,2,15,20
         st.dataframe(df.sort_values("S", ascending=False), width='stretch')
 
 with st.expander("2) Enter fixtures", expanded=True):
-    st.markdown("One per line as `Home vs Away`")
-    fx_sample = """Espanyol vs Valencia
+    st.markdown("**Choose teams to create fixtures:**")
+    
+    # Check if we have standings data
+    if 'df' in locals() and df is not None:
+        # Get team names from the standings data
+        team_names = sorted(df['Club'].tolist())
+        
+        # Create two columns for team selection
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col1:
+            home_team = st.selectbox("Home Team:", [""] + team_names, key="home_team")
+        
+        with col2:
+            away_team = st.selectbox("Away Team:", [""] + team_names, key="away_team")
+        
+        with col3:
+            if st.button("Add Fixture", type="primary"):
+                if home_team and away_team and home_team != away_team:
+                    # Add to session state
+                    if 'fixtures_list' not in st.session_state:
+                        st.session_state.fixtures_list = []
+                    st.session_state.fixtures_list.append(f"{home_team} vs {away_team}")
+                    st.success(f"Added: {home_team} vs {away_team}")
+                elif home_team == away_team:
+                    st.error("Home and away teams cannot be the same!")
+                else:
+                    st.error("Please select both teams!")
+        
+        # Display current fixtures
+        if 'fixtures_list' in st.session_state and st.session_state.fixtures_list:
+            st.markdown("**Current Fixtures:**")
+            for i, fixture in enumerate(st.session_state.fixtures_list):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.write(f"{i+1}. {fixture}")
+                with col2:
+                    if st.button("Remove", key=f"remove_{i}"):
+                        st.session_state.fixtures_list.pop(i)
+                        st.rerun()
+            
+            # Clear all button
+            if st.button("Clear All Fixtures"):
+                st.session_state.fixtures_list = []
+                st.rerun()
+        
+        # Convert to text for processing
+        if 'fixtures_list' in st.session_state and st.session_state.fixtures_list:
+            fixtures_text = "\n".join(st.session_state.fixtures_list)
+        else:
+            fixtures_text = ""
+    else:
+        st.warning("⚠️ Please fetch standings data first to use team selectors.")
+        st.markdown("**Manual entry (fallback):**")
+        fx_sample = """Espanyol vs Valencia
 Athletic Club vs Girona
 Sevilla vs Villarreal
 Levante vs Real Madrid
@@ -267,7 +320,7 @@ Atlético Madrid vs Rayo Vallecano
 Real Sociedad vs Mallorca
 Osasuna vs Elche
 Oviedo vs Barcelona"""
-    fixtures_text = st.text_area("Fixtures", fx_sample, height=220)
+        fixtures_text = st.text_area("Enter fixtures manually (one per line as `Home vs Away`):", fx_sample, height=220)
 
 fixtures = []
 for line in fixtures_text.splitlines():
