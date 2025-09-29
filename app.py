@@ -213,11 +213,10 @@ with st.expander("1) Fetch League Standings", expanded=True):
             st.session_state.standings_df = df
             st.session_state.league_name = league_name
             st.success(f"✅ {league_name} standings loaded successfully!")
-            st.dataframe(df.sort_values("S", ascending=False), width='stretch')
         else:
             st.error("Failed to fetch standings. Please try again.")
     
-    # Display standings if already loaded
+    # Display standings if loaded (only once)
     if 'standings_df' in st.session_state:
         st.success(f"✅ {st.session_state.league_name} standings loaded!")
         st.dataframe(st.session_state.standings_df.sort_values("S", ascending=False), width='stretch')
