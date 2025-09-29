@@ -94,7 +94,7 @@ def fetch_league_standings(league_name, season=None):
         
         # Sort by rank and renumber if needed
         df = df.sort_values("Rank", na_position="last").reset_index(drop=True)
-        df["Rank"] = range(1, len(df) + 1)
+        df["League Position"] = range(1, len(df) + 1)
         
         return df, league_name
         
@@ -235,6 +235,7 @@ with st.expander("1) Fetch League Standings", expanded=True):
     # Display standings if loaded (only once)
     if 'standings_df' in st.session_state:
         st.success(f"✅ {st.session_state.league_name} standings loaded!")
+        st.info("ℹ️ **Teams are ordered based on goal difference**")
         st.dataframe(st.session_state.standings_df.sort_values("S", ascending=False), width='stretch')
     
 
