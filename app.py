@@ -210,9 +210,7 @@ def compute_table(raw):
     df["D"] = (df["GA"] / df["MP"]).round(3)
     df["S"] = (df["O"] - df["D"]).round(3)
 
-    # ranks (lower is better)
-    df["Off Rank"] = df["O"].rank(ascending=False, method="min").astype(int)
-    df["Def Rank"] = df["D"].rank(ascending=True,  method="min").astype(int)  # lower GA better
+    # Note: Removed Off Rank and Def Rank columns for cleaner display
     df["Tier"] = df["S"].apply(tier_from_s)
     df["Style"] = df.apply(lambda r: style_tag(r["O"], r["D"]), axis=1)
     # optional: League Rank if provided; otherwise derive from Pts or leave blank
