@@ -176,31 +176,43 @@ def predict_row(home, away, df, draw_bias=0.1):
     away_scores = exp_away > 0.8
     btts = "Yes" if home_scores and away_scores else "No/Lean No"
 
-    # Score ranges based on expected goals - clearer format
-    def get_likely_scores(exp_goals):
-        if exp_goals < 0.8: return "0-1"
-        elif exp_goals < 1.5: return "1-2" 
-        elif exp_goals < 2.2: return "1-3"
-        else: return "2-4"
-
-    home_range = get_likely_scores(exp_home)
-    away_range = get_likely_scores(exp_away)
+    # Score prediction - show actual likely scores
+    def predict_likely_score(exp_home, exp_away):
+        # Round expected goals to get likely scores
+        home_goals = max(0, round(exp_home))
+        away_goals = max(0, round(exp_away))
+        
+        # Ensure we have at least 1 goal total for Over 2.5 predictions
+        if goals == "Over 2.5" and home_goals + away_goals < 3:
+            if exp_home > exp_away:
+                home_goals = max(2, home_goals)
+                away_goals = max(1, away_goals)
+            else:
+                away_goals = max(2, away_goals)
+                home_goals = max(1, home_goals)
+        
+        return f"{home_goals}-{away_goals}"
     
-    # Create more intuitive score prediction
-    if goals == "Under 2.5":
+    # Get most likely score
+    most_likely = predict_likely_score(exp_home, exp_away)
+    
+    # Add alternative scores
+    if goals == "Over 2.5":
         if exp_home > exp_away:
-            score_hint = f"Most likely: {home_range}-{away_range} (Home win)"
-        elif exp_away > exp_home:
-            score_hint = f"Most likely: {away_range}-{home_range} (Away win)"
+            alt1 = f"{max(2, round(exp_home))}-{max(1, round(exp_away))}"
+            alt2 = f"{max(3, round(exp_home))}-{max(0, round(exp_away))}"
         else:
-            score_hint = f"Most likely: {home_range}-{away_range} (Draw)"
-    else:  # Over 2.5
+            alt1 = f"{max(1, round(exp_home))}-{max(2, round(exp_away))}"
+            alt2 = f"{max(0, round(exp_home))}-{max(3, round(exp_away))}"
+    else:  # Under 2.5
         if exp_home > exp_away:
-            score_hint = f"Most likely: {home_range}-{away_range} (Home win)"
-        elif exp_away > exp_home:
-            score_hint = f"Most likely: {away_range}-{home_range} (Away win)"
+            alt1 = f"{max(1, round(exp_home))}-{max(0, round(exp_away))}"
+            alt2 = f"{max(2, round(exp_home))}-{max(0, round(exp_away))}"
         else:
-            score_hint = f"Most likely: {home_range}-{away_range} (Draw)"
+            alt1 = f"{max(0, round(exp_home))}-{max(1, round(exp_away))}"
+            alt2 = f"{max(0, round(exp_home))}-{max(2, round(exp_away))}"
+    
+    score_hint = f"Most likely: {most_likely} | Also: {alt1}, {alt2}"
 
     return {
         "Fixture": f"{a['Club']} vs {b['Club']}",
