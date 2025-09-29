@@ -155,17 +155,18 @@ def predict_row(home, away, df, draw_bias=0.1):
     home_advantage = 0.2
     
     # Expected goals based on attack vs defense matchup
-    # More aggressive calculation for clear mismatches
-    exp_home = max(0.8, a["O"] * (1.5 - b["D"]) + home_advantage)
-    exp_away = max(0.4, b["O"] * (1.5 - a["D"]))
+    # Fix the calculation to handle poor defenses properly
+    exp_home = max(1.0, a["O"] * (1.0 + max(0, 1.5 - b["D"])) + home_advantage)
+    exp_away = max(0.5, b["O"] * (1.0 + max(0, 1.5 - a["D"])))
     gsum = exp_home + exp_away
 
     # Debug: Show expected goals in edges
     debug_goals = f"exp_home={exp_home:.2f}, exp_away={exp_away:.2f}, total={gsum:.2f}"
 
-    if gsum >= 2.8:
+    # Much lower threshold for Over 2.5
+    if gsum >= 2.5:
         goals = "Over 2.5"
-    elif gsum <= 2.2:
+    elif gsum <= 2.0:
         goals = "Under 2.5"
     else:
         goals = "Lean Over 2.5"
