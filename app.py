@@ -176,43 +176,82 @@ def predict_row(home, away, df, draw_bias=0.1):
     away_scores = exp_away > 0.8
     btts = "Yes" if home_scores and away_scores else "No/Lean No"
 
-    # Score prediction - show actual likely scores
-    def predict_likely_score(exp_home, exp_away):
-        # Round expected goals to get likely scores
-        home_goals = max(0, round(exp_home))
-        away_goals = max(0, round(exp_away))
+    # Score prediction - show actual likely scores with variety
+    def get_score_predictions(exp_home, exp_away, is_over_25):
+        # Main prediction - round expected goals
+        main_home = max(0, round(exp_home))
+        main_away = max(0, round(exp_away))
         
-        # Ensure we have at least 1 goal total for Over 2.5 predictions
-        if goals == "Over 2.5" and home_goals + away_goals < 3:
+        # Ensure minimum goals for Over 2.5
+        if is_over_25 and main_home + main_away < 3:
             if exp_home > exp_away:
-                home_goals = max(2, home_goals)
-                away_goals = max(1, away_goals)
+                main_home = max(2, main_home)
+                main_away = max(1, main_away)
             else:
-                away_goals = max(2, away_goals)
-                home_goals = max(1, home_goals)
+                main_away = max(2, main_away)
+                main_home = max(1, main_home)
         
-        return f"{home_goals}-{away_goals}"
-    
-    # Get most likely score
-    most_likely = predict_likely_score(exp_home, exp_away)
-    
-    # Add alternative scores
-    if goals == "Over 2.5":
+        # Generate varied alternatives
+        scores = []
+        
+        # Main prediction
+        scores.append(f"{main_home}-{main_away}")
+        
+        # Alternative 1: Slightly different
         if exp_home > exp_away:
-            alt1 = f"{max(2, round(exp_home))}-{max(1, round(exp_away))}"
-            alt2 = f"{max(3, round(exp_home))}-{max(0, round(exp_away))}"
+            alt1_home = main_home + (1 if main_home < 4 else 0)
+            alt1_away = max(0, main_away - (1 if main_away > 0 else 0))
         else:
-            alt1 = f"{max(1, round(exp_home))}-{max(2, round(exp_away))}"
-            alt2 = f"{max(0, round(exp_home))}-{max(3, round(exp_away))}"
-    else:  # Under 2.5
+            alt1_home = max(0, main_home - (1 if main_home > 0 else 0))
+            alt1_away = main_away + (1 if main_away < 4 else 0)
+        
+        # Ensure Over 2.5 constraint
+        if is_over_25 and alt1_home + alt1_away < 3:
+            if alt1_home > alt1_away:
+                alt1_home = max(2, alt1_home)
+                alt1_away = max(1, alt1_away)
+            else:
+                alt1_away = max(2, alt1_away)
+                alt1_home = max(1, alt1_home)
+        
+        scores.append(f"{alt1_home}-{alt1_away}")
+        
+        # Alternative 2: More different
         if exp_home > exp_away:
-            alt1 = f"{max(1, round(exp_home))}-{max(0, round(exp_away))}"
-            alt2 = f"{max(2, round(exp_home))}-{max(0, round(exp_away))}"
+            alt2_home = main_home + (2 if main_home < 3 else 1)
+            alt2_away = max(0, main_away - (1 if main_away > 1 else 0))
         else:
-            alt1 = f"{max(0, round(exp_home))}-{max(1, round(exp_away))}"
-            alt2 = f"{max(0, round(exp_home))}-{max(2, round(exp_away))}"
+            alt2_home = max(0, main_home - (1 if main_home > 1 else 0))
+            alt2_away = main_away + (2 if main_away < 3 else 1)
+        
+        # Ensure Over 2.5 constraint
+        if is_over_25 and alt2_home + alt2_away < 3:
+            if alt2_home > alt2_away:
+                alt2_home = max(2, alt2_home)
+                alt2_away = max(1, alt2_away)
+            else:
+                alt2_away = max(2, alt2_away)
+                alt2_home = max(1, alt2_home)
+        
+        scores.append(f"{alt2_home}-{alt2_away}")
+        
+        # Remove duplicates while preserving order
+        unique_scores = []
+        for score in scores:
+            if score not in unique_scores:
+                unique_scores.append(score)
+        
+        return unique_scores
     
-    score_hint = f"Most likely: {most_likely} | Also: {alt1}, {alt2}"
+    # Get varied score predictions
+    score_predictions = get_score_predictions(exp_home, exp_away, goals == "Over 2.5")
+    
+    if len(score_predictions) >= 3:
+        score_hint = f"Most likely: {score_predictions[0]} | Also: {score_predictions[1]}, {score_predictions[2]}"
+    elif len(score_predictions) == 2:
+        score_hint = f"Most likely: {score_predictions[0]} | Also: {score_predictions[1]}"
+    else:
+        score_hint = f"Most likely: {score_predictions[0]}"
 
     return {
         "Fixture": f"{a['Club']} vs {b['Club']}",
