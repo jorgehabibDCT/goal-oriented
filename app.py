@@ -67,10 +67,21 @@ def fetch_league_standings(league_name, season=None):
                 mp = _choose(stats, "gamesPlayed", "played", "GP", default=None)
                 gf = _choose(stats, "goalsFor", "pointsFor", "GF", default=None)
                 ga = _choose(stats, "goalsAgainst", "pointsAgainst", "GA", default=None)
-                rank = e.get("stats", [{}])[0].get("rank") if e.get("stats") else e.get("rank")
-                # Some payloads store rank in e["rank"]; keep both attempts
+                # Extract rank from stats array - look for the rank stat specifically
+                rank = None
+                if e.get("stats"):
+                    for stat in e["stats"]:
+                        if stat.get("name") == "rank":
+                            rank = stat.get("value")
+                            break
+                
+                # Fallback to direct rank field
                 if rank is None:
                     rank = e.get("rank")
+                
+                # If still no rank, use position in list + 1
+                if rank is None:
+                    rank = len(rows) + 1
                 if all(v is not None for v in (name, mp, gf, ga)):
                     rows.append({"Club": name, "MP": int(mp), "GF": int(gf), "GA": int(ga), "Rank": rank})
         
@@ -80,6 +91,11 @@ def fetch_league_standings(league_name, season=None):
             raise RuntimeError("Could not parse ESPN standings; check league/season or payload shape.")
         df = (df.sort_values(["Club","Rank"], na_position="last")
                 .groupby("Club", as_index=False).first())
+        
+        # Sort by rank and renumber if needed
+        df = df.sort_values("Rank", na_position="last").reset_index(drop=True)
+        df["Rank"] = range(1, len(df) + 1)
+        
         return df, league_name
         
     except Exception as e:
