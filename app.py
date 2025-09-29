@@ -176,22 +176,31 @@ def predict_row(home, away, df, draw_bias=0.1):
     away_scores = exp_away > 0.8
     btts = "Yes" if home_scores and away_scores else "No/Lean No"
 
-    # Score ranges based on expected goals
-    def score_range(exp_goals):
-        if exp_goals < 0.8: return [0, 1]
-        elif exp_goals < 1.5: return [1, 2]
-        elif exp_goals < 2.2: return [1, 3]
-        else: return [2, 4]
+    # Score ranges based on expected goals - clearer format
+    def get_likely_scores(exp_goals):
+        if exp_goals < 0.8: return "0-1"
+        elif exp_goals < 1.5: return "1-2" 
+        elif exp_goals < 2.2: return "1-3"
+        else: return "2-4"
 
-    hr = score_range(exp_home)
-    ar = score_range(exp_away)
+    home_range = get_likely_scores(exp_home)
+    away_range = get_likely_scores(exp_away)
     
-    # Ensure score ranges make sense with predictions
+    # Create more intuitive score prediction
     if goals == "Under 2.5":
-        hr = [min(hr[0], 1), min(hr[1], 2)]
-        ar = [min(ar[0], 1), min(ar[1], 2)]
-    
-    score_hint = f"{hr[0]}–{ar[0]} .. {hr[1]}–{ar[1]}"
+        if exp_home > exp_away:
+            score_hint = f"Most likely: {home_range}-{away_range} (Home win)"
+        elif exp_away > exp_home:
+            score_hint = f"Most likely: {away_range}-{home_range} (Away win)"
+        else:
+            score_hint = f"Most likely: {home_range}-{away_range} (Draw)"
+    else:  # Over 2.5
+        if exp_home > exp_away:
+            score_hint = f"Most likely: {home_range}-{away_range} (Home win)"
+        elif exp_away > exp_home:
+            score_hint = f"Most likely: {away_range}-{home_range} (Away win)"
+        else:
+            score_hint = f"Most likely: {home_range}-{away_range} (Draw)"
 
     return {
         "Fixture": f"{a['Club']} vs {b['Club']}",
