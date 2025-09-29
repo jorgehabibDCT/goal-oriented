@@ -7,67 +7,75 @@ from datetime import datetime
 
 st.set_page_config(page_title="Matchup Predictor", page_icon="⚽", layout="wide")
 
-ESPN_BASE = "https://site.api.espn.com/apis/v2/sports"
+# Football Standings API - https://github.com/azharimm/football-standings-api
+STANDINGS_API_BASE = "https://api-football-standings.azharimm.site"
 
-def _choose(v, *keys, default=None):
-    """Safely pick the first existing key in dict v['stats'] list or v directly."""
-    if isinstance(v, dict) and "stats" in v:
-        bag = {s.get("name") or s.get("shortDisplayName",""): s for s in v["stats"]}
-        for k in keys:
-            if k in bag and "value" in bag[k]:
-                return bag[k]["value"]
-    if isinstance(v, dict):
-        for k in keys:
-            if k in v:
-                return v[k]
-    return default
+def fetch_available_leagues():
+    """Fetch all available leagues from the standings API."""
+    try:
+        url = f"{STANDINGS_API_BASE}/leagues"
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        
+        if data.get("status") and "data" in data:
+            return data["data"]
+        return []
+    except Exception as e:
+        st.error(f"Error fetching leagues: {e}")
+        return []
 
-def fetch_espn_soccer_standings(league="esp.1", season=None):
-    """
-    League codes (ESPN):
-      - LaLiga: esp.1
-      - Premier League: eng.1
-      - Serie A: ita.1
-      - Bundesliga: ger.1
-      - Ligue 1: fra.1
-    """
-    if season is None:
-        season = datetime.utcnow().year
-    # main table
-    url = f"{ESPN_BASE}/soccer/{league}/standings?season={season}"
-    r = requests.get(url, timeout=20)
-    r.raise_for_status()
-    data = r.json()
-
-    # The payload has groups -> standings -> entries (teams) with stats.
-    # We'll flatten every group (some leagues have multiple groups/phases).
-    rows = []
-    groups = data.get("children") or data.get("standings", {}).get("groups") or [data]
-    for g in groups:
-        standings = g.get("standings") or g  # be tolerant to shapes
-        entries = standings.get("entries") if isinstance(standings, dict) else g.get("entries")
-        if not entries:
-            continue
-        for e in entries:
-            team = e.get("team", {})
-            name = team.get("displayName") or team.get("name")
-            stats = e  # stats typically live in the entry
-            mp = _choose(stats, "gamesPlayed", "played", "GP", default=None)
-            gf = _choose(stats, "goalsFor", "pointsFor", "GF", default=None)
-            ga = _choose(stats, "goalsAgainst", "pointsAgainst", "GA", default=None)
-            rank = e.get("stats", [{}])[0].get("rank") if e.get("stats") else e.get("rank")
-            # Some payloads store rank in e["rank"]; keep both attempts
-            if rank is None:
-                rank = e.get("rank")
-            if all(v is not None for v in (name, mp, gf, ga)):
-                rows.append({"Club": name, "MP": int(mp), "GF": int(gf), "GA": int(ga), "Rank": rank})
-    # De-duplicate by Club (take best rank)
-    df = pd.DataFrame(rows)
-    if df.empty:
-        raise RuntimeError("Could not parse ESPN standings; check league/season or payload shape.")
-    df = (df.sort_values(["Club","Rank"], na_position="last")
-            .groupby("Club", as_index=False).first())
-    return df
+def fetch_league_standings(league_id, season=None):
+    """Fetch standings for a specific league."""
+    try:
+        if season is None:
+            season = datetime.utcnow().year
+            
+        url = f"{STANDINGS_API_BASE}/leagues/{league_id}/standings"
+        params = {"season": season, "sort": "asc"}
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        
+        if not data.get("status") or "data" not in data:
+            raise ValueError("Invalid API response")
+            
+        league_data = data["data"]
+        standings = league_data.get("standings", [])
+        
+        if not standings:
+            raise ValueError("No standings data available")
+            
+        # Convert to our expected format
+        rows = []
+        for team in standings:
+            name = team.get("name", "")
+            stats = team.get("stats", {})
+            
+            # Extract stats with fallbacks
+            mp = stats.get("gamesPlayed", stats.get("played", 0))
+            gf = stats.get("goalsFor", stats.get("pointsFor", 0))
+            ga = stats.get("goalsAgainst", stats.get("pointsAgainst", 0))
+            rank = stats.get("rank", team.get("rank", 0))
+            
+            if name and mp is not None and gf is not None and ga is not None:
+                rows.append({
+                    "Club": name,
+                    "MP": int(mp),
+                    "GF": int(gf), 
+                    "GA": int(ga),
+                    "Rank": int(rank) if rank else 0
+                })
+        
+        if not rows:
+            raise ValueError("No valid team data found")
+            
+        df = pd.DataFrame(rows)
+        return df, league_data.get("name", "Unknown League")
+        
+    except Exception as e:
+        st.error(f"Error fetching standings for {league_id}: {e}")
+        return None, None
 
 # ---------- helpers ----------
 TIER_RULES = [
@@ -174,9 +182,42 @@ def compute_table(raw):
 # ---------- UI ----------
 st.title("⚽ Tier-based Matchup Predictor")
 
-with st.expander("1) Paste or upload standings (CSV)", expanded=True):
-    st.markdown("**Required columns:** `Club, MP, GF, GA` (you can also include `Rank, Pts` etc.)")
-    sample = """Club,MP,GF,GA,Rank
+with st.expander("1) Select League and Season", expanded=True):
+    st.markdown("**Choose a league to automatically fetch current standings:**")
+    
+    # Fetch available leagues
+    with st.spinner("Loading available leagues..."):
+        leagues = fetch_available_leagues()
+    
+    if leagues:
+        # Create league selection
+        league_options = {f"{league['name']} ({league['abbr']})": league['id'] for league in leagues}
+        selected_league_name = st.selectbox("Select League:", list(league_options.keys()))
+        selected_league_id = league_options[selected_league_name]
+        
+        # Season selection
+        current_year = datetime.utcnow().year
+        season = st.number_input("Season:", min_value=2020, max_value=current_year+1, value=current_year)
+        
+        # Fetch standings button
+        if st.button("Fetch Standings", type="primary"):
+            with st.spinner(f"Fetching {selected_league_name} standings..."):
+                df, league_name = fetch_league_standings(selected_league_id, season)
+                
+            if df is not None:
+                df = compute_table(df)
+                st.success(f"✅ {league_name} standings loaded successfully!")
+                st.dataframe(df.sort_values("S", ascending=False), width='stretch')
+            else:
+                st.error("Failed to fetch standings. Please try again.")
+    else:
+        st.error("Unable to load leagues. Please check your internet connection.")
+        st.info("You can still use the manual CSV upload option below.")
+        
+        # Fallback to CSV upload
+        st.markdown("**Manual CSV Upload (Fallback):**")
+        st.markdown("**Required columns:** `Club, MP, GF, GA`")
+        sample = """Club,MP,GF,GA,Rank
 Real Madrid,5,10,2,1
 Barcelona,5,16,3,2
 Villarreal,5,10,4,3
@@ -198,19 +239,19 @@ Real Sociedad,5,5,9,18
 Mallorca,5,5,10,19
 Girona,5,2,15,20
 """
-    c1, c2 = st.columns([2,1])
-    with c1:
-        text = st.text_area("Paste CSV here", sample, height=250)
-    with c2:
-        up = st.file_uploader("...or upload CSV", type=["csv"])
-    if up is not None:
-        raw_df = pd.read_csv(up)
-    else:
-        raw_df = pd.read_csv(io.StringIO(text))
+        c1, c2 = st.columns([2,1])
+        with c1:
+            text = st.text_area("Paste CSV here", sample, height=250)
+        with c2:
+            up = st.file_uploader("...or upload CSV", type=["csv"])
+        if up is not None:
+            raw_df = pd.read_csv(up)
+        else:
+            raw_df = pd.read_csv(io.StringIO(text))
 
-    df = compute_table(raw_df)
-    st.success("Standings processed.")
-    st.dataframe(df.sort_values("S", ascending=False), use_container_width=True)
+        df = compute_table(raw_df)
+        st.success("Standings processed.")
+        st.dataframe(df.sort_values("S", ascending=False), width='stretch')
 
 with st.expander("2) Enter fixtures", expanded=True):
     st.markdown("One per line as `Home vs Away`")
@@ -234,6 +275,12 @@ for line in fixtures_text.splitlines():
 
 st.markdown("---")
 st.subheader("Predictions")
+
+# Check if we have standings data
+if 'df' not in locals():
+    st.warning("⚠️ Please fetch standings data first before making predictions.")
+    st.stop()
+
 rows = []
 missing = []
 for h, a in fixtures:
@@ -244,7 +291,7 @@ for h, a in fixtures:
 
 pred_df = pd.DataFrame(rows)
 if not pred_df.empty:
-    st.dataframe(pred_df, use_container_width=True)
+    st.dataframe(pred_df, width='stretch')
     csv = pred_df.to_csv(index=False).encode("utf-8")
     st.download_button("Download predictions (CSV)", csv, "predictions.csv", "text/csv")
 else:
