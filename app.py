@@ -83,18 +83,17 @@ def fetch_league_standings(league_name, season=None):
                 if rank is None:
                     rank = len(rows) + 1
                 if all(v is not None for v in (name, mp, gf, ga)):
-                    rows.append({"Club": name, "MP": int(mp), "GF": int(gf), "GA": int(ga), "Rank": rank})
+                    rows.append({"Club": name, "MP": int(mp), "GF": int(gf), "GA": int(ga)})
         
-        # De-duplicate by Club (take best rank)
+        # De-duplicate by Club
         df = pd.DataFrame(rows)
         if df.empty:
             raise RuntimeError("Could not parse ESPN standings; check league/season or payload shape.")
-        df = (df.sort_values(["Club","Rank"], na_position="last")
-                .groupby("Club", as_index=False).first())
+        df = df.groupby("Club", as_index=False).first()
         
-        # Sort by rank and renumber if needed
-        df = df.sort_values("Rank", na_position="last").reset_index(drop=True)
-        df["League Position"] = range(1, len(df) + 1)
+        # Sort by goal difference (S = GF - GA) and reset index for clean numbering
+        df = df.sort_values(["GF", "GA"], ascending=[False, True]).reset_index(drop=True)
+        df.index = df.index + 1  # Start numbering from 1 instead of 0
         
         return df, league_name
         
@@ -235,7 +234,7 @@ with st.expander("1) Fetch League Standings", expanded=True):
     # Display standings if loaded (only once)
     if 'standings_df' in st.session_state:
         st.success(f"✅ {st.session_state.league_name} standings loaded!")
-        st.info("ℹ️ **Teams are ordered based on goal difference**")
+        st.info("ℹ️ **Teams are ordered by goals scored, then goals against**")
         st.dataframe(st.session_state.standings_df.sort_values("S", ascending=False), width='stretch')
     
 
