@@ -1,4 +1,3 @@
-import io
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -192,7 +191,7 @@ def compute_table(raw):
 # ---------- UI ----------
 st.title("⚽ Tier-based Matchup Predictor")
 
-with st.expander("1) Select League and Season", expanded=True):
+with st.expander("1) Fetch League Standings", expanded=True):
     st.markdown("**Choose a league to automatically fetch current standings:**")
     
     # Create league selection from predefined list
@@ -214,47 +213,6 @@ with st.expander("1) Select League and Season", expanded=True):
         else:
             st.error("Failed to fetch standings. Please try again.")
     
-    # Fallback to CSV upload
-    st.markdown("---")
-    st.markdown("**Or upload your own CSV data:**")
-    st.markdown("**Required columns:** `Club, MP, GF, GA`")
-    sample = """Club,MP,GF,GA,Rank
-Real Madrid,5,10,2,1
-Barcelona,5,16,3,2
-Villarreal,5,10,4,3
-Espanyol,5,8,7,4
-Elche,5,7,4,5
-Real Betis,6,9,7,6
-Athletic Club,5,6,6,7
-Getafe,5,6,7,8
-Sevilla,5,9,8,9
-Alavés,5,5,5,10
-Valencia,5,6,8,11
-Atlético Madrid,5,6,5,12
-Osasuna,5,4,4,13
-Rayo Vallecano,5,5,6,14
-Celta Vigo,6,5,7,15
-Levante,5,9,9,16
-Oviedo,5,1,8,17
-Real Sociedad,5,5,9,18
-Mallorca,5,5,10,19
-Girona,5,2,15,20
-"""
-    c1, c2 = st.columns([2,1])
-    with c1:
-        text = st.text_area("Paste CSV here", sample, height=200)
-    with c2:
-        up = st.file_uploader("...or upload CSV", type=["csv"])
-    
-    if st.button("Process CSV Data", type="secondary"):
-        if up is not None:
-            raw_df = pd.read_csv(up)
-        else:
-            raw_df = pd.read_csv(io.StringIO(text))
-
-        df = compute_table(raw_df)
-        st.success("CSV standings processed.")
-        st.dataframe(df.sort_values("S", ascending=False), width='stretch')
 
 with st.expander("2) Enter fixtures", expanded=True):
     st.markdown("**Choose teams to create fixtures:**")
@@ -310,17 +268,7 @@ with st.expander("2) Enter fixtures", expanded=True):
             fixtures_text = ""
     else:
         st.warning("⚠️ Please fetch standings data first to use team selectors.")
-        st.markdown("**Manual entry (fallback):**")
-        fx_sample = """Espanyol vs Valencia
-Athletic Club vs Girona
-Sevilla vs Villarreal
-Levante vs Real Madrid
-Getafe vs Alavés
-Atlético Madrid vs Rayo Vallecano
-Real Sociedad vs Mallorca
-Osasuna vs Elche
-Oviedo vs Barcelona"""
-        fixtures_text = st.text_area("Enter fixtures manually (one per line as `Home vs Away`):", fx_sample, height=220)
+        fixtures_text = ""
 
 fixtures = []
 for line in fixtures_text.splitlines():
