@@ -295,7 +295,7 @@ def compute_table(raw):
 
 # ---------- UI ----------
 st.title("⚽ Goalflux")
-st.markdown("**Intelligent Football Matchup Predictor** - Analyze team tiers, predict outcomes, and discover betting insights")
+st.markdown("**Intelligent Football Matchup Predictor**")
 
 with st.expander("1) Fetch League Standings", expanded=True):
     st.markdown("**Choose a league to automatically fetch current standings:**")
