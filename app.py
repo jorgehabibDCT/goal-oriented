@@ -152,16 +152,20 @@ def predict_row(home, away, df, draw_bias=0.1):
 
     # goals market - improved expected goals calculation
     # Home advantage factor
-    home_advantage = 0.1
+    home_advantage = 0.2
     
     # Expected goals based on attack vs defense matchup
-    exp_home = max(0.5, a["O"] * (2.0 - b["D"]) + home_advantage)
-    exp_away = max(0.3, b["O"] * (2.0 - a["D"]))
+    # More aggressive calculation for clear mismatches
+    exp_home = max(0.8, a["O"] * (1.5 - b["D"]) + home_advantage)
+    exp_away = max(0.4, b["O"] * (1.5 - a["D"]))
     gsum = exp_home + exp_away
 
-    if gsum >= 3.0:
+    # Debug: Show expected goals in edges
+    debug_goals = f"exp_home={exp_home:.2f}, exp_away={exp_away:.2f}, total={gsum:.2f}"
+
+    if gsum >= 2.8:
         goals = "Over 2.5"
-    elif gsum <= 2.0:
+    elif gsum <= 2.2:
         goals = "Under 2.5"
     else:
         goals = "Lean Over 2.5"
@@ -198,7 +202,7 @@ def predict_row(home, away, df, draw_bias=0.1):
         "Goals": goals,
         "BTTS": btts,
         "Score range": score_hint,
-        "Edges": f"SΔ={s_diff:+.2f}, O_vs_DΔ={o_vs_d_edge:+.2f}"
+        "Edges": f"SΔ={s_diff:+.2f}, O_vs_DΔ={o_vs_d_edge:+.2f}, {debug_goals}"
     }
 
 def compute_table(raw):
