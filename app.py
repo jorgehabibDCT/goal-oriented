@@ -323,7 +323,6 @@ with st.expander("1) Fetch League Standings", expanded=True):
     
     # Display standings if loaded (only once)
     if 'standings_df' in st.session_state:
-        st.success(f"✅ {st.session_state.league_name} standings loaded!")
         st.info("ℹ️ **Teams are ordered by goals scored, then goals against**")
         st.dataframe(st.session_state.standings_df.sort_values("S", ascending=False), width='stretch')
     
