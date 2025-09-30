@@ -119,15 +119,15 @@ def tier_from_s(s):
 def style_tag(o, d):
     # thresholds are simple; tweak as you like
     if o >= 1.8 and d >= 1.6:
-        return "⚡ Attack-heavy, leaky"
+        return "Attack-heavy, leaky"
     if o >= 1.8 and d <= 1.0:
-        return "🔥 Balanced high-scoring"
+        return "Balanced high-scoring"
     if o <= 1.0 and d <= 1.0:
-        return "❄️ Low-event (both low)"
+        return "Low-event (both low)"
     if d <= 0.9 and o < 1.5:
-        return "🛡️ Defense-first"
+        return "Defense-first"
     if o >= 1.6 and d > 1.2:
-        return "⚔️ Chaotic (goals both ways)"
+        return "Chaotic (goals both ways)"
     return "Mixed"
 
 def _exp_goals(att_o, opp_d, league_mean_o, league_mean_d, home_boost=0.15):
@@ -152,127 +152,97 @@ def _exp_goals(att_o, opp_d, league_mean_o, league_mean_d, home_boost=0.15):
 
     return max(0.2, base * mult + home_boost)
 
+import math
+
+def _poisson_pmf(lmbda, k):
+    # stable Poisson PMF without scipy
+    return math.exp(-lmbda) * (lmbda ** k) / math.factorial(k)
+
+def _score_probs(exp_home, exp_away, cap=6):
+    # returns matrix P[i][j] and handy aggregates
+    P = []
+    home_marg = []
+    away_marg = []
+    for i in range(cap+1):
+        p_i = _poisson_pmf(exp_home, i)
+        row = []
+        for j in range(cap+1):
+            p = p_i * _poisson_pmf(exp_away, j)
+            row.append(p)
+        P.append(row)
+    # aggregates
+    ph_win = sum(P[i][j] for i in range(cap+1) for j in range(cap+1) if i > j)
+    p_draw = sum(P[i][i] for i in range(cap+1))
+    pa_win = 1.0 - ph_win - p_draw
+    p_over25 = sum(P[i][j] for i in range(cap+1) for j in range(cap+1) if i + j >= 3)
+    p_btts   = sum(P[i][j] for i in range(1, cap+1) for j in range(1, cap+1))
+    # top scores
+    flat = [((i, j), P[i][j]) for i in range(cap+1) for j in range(cap+1)]
+    flat.sort(key=lambda x: x[1], reverse=True)
+    top = []
+    for (i, j), pr in flat:
+        s = f"{i}-{j}"
+        if s not in top:
+            top.append(s)
+        if len(top) == 3:
+            break
+    return {
+        "P": P,
+        "ph_win": ph_win,
+        "p_draw": p_draw,
+        "pa_win": pa_win,
+        "p_over25": p_over25,
+        "p_btts": p_btts,
+        "top_scores": top
+    }
+
 def predict_row(home, away, df, draw_bias=0.1):
     a = df.loc[df["Club"].str.casefold()==home.casefold()].iloc[0]
     b = df.loc[df["Club"].str.casefold()==away.casefold()].iloc[0]
 
-    # strengths
+    # strengths / styles for display
     s_diff = (a["S"] - b["S"])
     o_vs_d_edge = (a["O"] - b["D"]) - (b["O"] - a["D"])
 
-    # 1X2 lean (unchanged)
-    if s_diff > 0.5:
-        outcome = f"{a['Club']} win"
-    elif s_diff < -0.5:
-        outcome = f"{b['Club']} win"
-    elif s_diff > 0.25 + draw_bias:
-        outcome = f"{a['Club']} win"
-    elif s_diff < -0.25 - draw_bias:
-        outcome = f"{b['Club']} win"
-    else:
-        outcome = "Draw"
-
-    # --- NEW expected goals ---
-    mean_o = df["O"].mean()
-    mean_d = df["D"].mean()
-
+    # xG (the fixed version from my last message)
+    mean_o = df["O"].mean(); mean_d = df["D"].mean()
     exp_home = _exp_goals(a["O"], b["D"], mean_o, mean_d, home_boost=0.20)
     exp_away = _exp_goals(b["O"], a["D"], mean_o, mean_d, home_boost=0.00)
     gsum = exp_home + exp_away
-    debug_goals = f"exp_home={exp_home:.2f}, exp_away={exp_away:.2f}, total={gsum:.2f}"
 
-    # Goals market (slightly tighter bands)
-    if gsum >= 2.65:
+    # --- single source of truth: Poisson grid ---
+    agg = _score_probs(exp_home, exp_away, cap=6)
+
+    # 1X2 from probabilities (adds % to be transparent)
+    trio = [("Draw", agg["p_draw"]), (a["Club"]+" win", agg["ph_win"]), (b["Club"]+" win", agg["pa_win"])]
+    trio.sort(key=lambda x: x[1], reverse=True)
+    outcome, p_outcome = trio[0]
+    # add "Lean …" if margin is small
+    margin = p_outcome - trio[1][1]
+    if margin < 0.05:
+        outcome = "Draw" if outcome == "Draw" else f"Lean {outcome}"
+
+    # Goals market from p(Over 2.5)
+    p_over = agg["p_over25"]
+    if p_over >= 0.58:
         goals = "Over 2.5"
-    elif gsum <= 2.25:
+    elif p_over <= 0.42:
         goals = "Under 2.5"
     else:
         goals = "Lean Over 2.5"
 
-    # BTTS aligned to xG, not too bullish
-    if exp_home >= 1.2 and exp_away >= 1.1:
+    # BTTS from p(BTTS)
+    p_btts = agg["p_btts"]
+    if p_btts >= 0.58:
         btts = "Yes"
-    elif exp_home >= 0.9 and exp_away >= 0.9:
-        btts = "Lean Yes"
-    elif exp_home >= 1.3 or exp_away >= 1.3:
-        btts = "Lean No"
-    else:
+    elif p_btts <= 0.42:
         btts = "No"
-
-    # (keep your score generator as-is)
-    def get_score_predictions(exp_home, exp_away, is_over_25):
-        # Main prediction - round expected goals
-        main_home = max(0, round(exp_home))
-        main_away = max(0, round(exp_away))
-        
-        # Ensure minimum goals for Over 2.5
-        if is_over_25 and main_home + main_away < 3:
-            if exp_home > exp_away:
-                main_home = max(2, main_home)
-                main_away = max(1, main_away)
-            else:
-                main_away = max(2, main_away)
-                main_home = max(1, main_home)
-        
-        # Generate varied alternatives
-        scores = []
-        
-        # Main prediction
-        scores.append(f"{main_home}-{main_away}")
-        
-        # Alternative 1: Slightly different
-        if exp_home > exp_away:
-            alt1_home = main_home + (1 if main_home < 4 else 0)
-            alt1_away = max(0, main_away - (1 if main_away > 0 else 0))
-        else:
-            alt1_home = max(0, main_home - (1 if main_home > 0 else 0))
-            alt1_away = main_away + (1 if main_away < 4 else 0)
-        
-        # Ensure Over 2.5 constraint
-        if is_over_25 and alt1_home + alt1_away < 3:
-            if alt1_home > alt1_away:
-                alt1_home = max(2, alt1_home)
-                alt1_away = max(1, alt1_away)
-            else:
-                alt1_away = max(2, alt1_away)
-                alt1_home = max(1, alt1_home)
-        
-        scores.append(f"{alt1_home}-{alt1_away}")
-        
-        # Alternative 2: More different
-        if exp_home > exp_away:
-            alt2_home = main_home + (2 if main_home < 3 else 1)
-            alt2_away = max(0, main_away - (1 if main_away > 1 else 0))
-        else:
-            alt2_home = max(0, main_home - (1 if main_home > 1 else 0))
-            alt2_away = main_away + (2 if main_away < 3 else 1)
-        
-        # Ensure Over 2.5 constraint
-        if is_over_25 and alt2_home + alt2_away < 3:
-            if alt2_home > alt2_away:
-                alt2_home = max(2, alt2_home)
-                alt2_away = max(1, alt2_away)
-            else:
-                alt2_away = max(2, alt2_away)
-                alt2_home = max(1, alt2_home)
-        
-        scores.append(f"{alt2_home}-{alt2_away}")
-        
-        # Remove duplicates while preserving order
-        unique_scores = []
-        for score in scores:
-            if score not in unique_scores:
-                unique_scores.append(score)
-        
-        return unique_scores
-    
-    score_predictions = get_score_predictions(exp_home, exp_away, goals == "Over 2.5")
-    if len(score_predictions) >= 3:
-        score_hint = f"Most likely: {score_predictions[0]} | Also: {score_predictions[1]}, {score_predictions[2]}"
-    elif len(score_predictions) == 2:
-        score_hint = f"Most likely: {score_predictions[0]} | Also: {score_predictions[1]}"
     else:
-        score_hint = f"Most likely: {score_predictions[0]}"
+        btts = "Lean Yes" if p_btts > 0.5 else "Lean No"
+
+    # Scorelines (top 3 from the same grid)
+    top = agg["top_scores"]
+    score_hint = f"Most likely: {top[0]}" + (f" | Also: {', '.join(top[1:])}" if len(top) > 1 else "")
 
     return {
         "Fixture": f"{a['Club']} vs {b['Club']}",
@@ -284,7 +254,12 @@ def predict_row(home, away, df, draw_bias=0.1):
         "Goals": goals,
         "BTTS": btts,
         "Score range": score_hint,
-        "Edges": f"SΔ={s_diff:+.2f}, O_vs_DΔ={o_vs_d_edge:+.2f}, {debug_goals}"
+        "Edges": (
+            f"SΔ={s_diff:+.2f}, O_vs_DΔ={o_vs_d_edge:+.2f}, "
+            f"exp_home={exp_home:.2f}, exp_away={exp_away:.2f}, "
+            f"P(H)= {agg['ph_win']:.2%}, P(D)= {agg['p_draw']:.2%}, P(A)= {agg['pa_win']:.2%}, "
+            f"P(Over2.5)= {p_over:.2%}, P(BTTS)= {p_btts:.2%}"
+        ),
     }
 
 def compute_table(raw):
@@ -303,7 +278,7 @@ def compute_table(raw):
     return df
 
 # ---------- UI ----------
-st.title("⚽ Goalflux")
+st.title("Goalflux")
 st.markdown("**Intelligent Football Matchup Predictor**")
 
 with st.expander("1) Fetch League Standings", expanded=True):
@@ -326,13 +301,13 @@ with st.expander("1) Fetch League Standings", expanded=True):
             # Store in session state to persist across reruns
             st.session_state.standings_df = df
             st.session_state.league_name = league_name
-            st.success(f"✅ {league_name} standings loaded successfully!")
+            st.success(f"{league_name} standings loaded successfully!")
         else:
             st.error("Failed to fetch standings. Please try again.")
     
     # Display standings if loaded (only once)
     if 'standings_df' in st.session_state:
-        st.info("ℹ️ **Teams are ordered by goals scored, then goals against**")
+        st.info("**Teams are ordered by goals scored, then goals against**")
         st.dataframe(st.session_state.standings_df.sort_values("S", ascending=False), width='stretch')
     
 
