@@ -130,65 +130,76 @@ def style_tag(o, d):
         return "⚔️ Chaotic (goals both ways)"
     return "Mixed"
 
+def _exp_goals(att_o, opp_d, league_mean_o, league_mean_d, home_boost=0.15):
+    """
+    att_o: team goals scored per match (O)
+    opp_d: opponent goals conceded per match (D)
+    league_mean_o, league_mean_d: means from your standings df
+    home_boost: small bump for the home side
+    """
+    # How good is the attack vs average?
+    atk_rel = (att_o / max(0.01, league_mean_o))
+
+    # How leaky is the opponent vs average? (>1 = worse than avg, <1 = better)
+    def_rel = (opp_d / max(0.01, league_mean_d))
+
+    # Map to a gentle multiplier. Poor defenses (>1) increase xG, elite defenses (<1) decrease it.
+    # Clamp so it doesn't go wild.
+    mult = 1.0 + np.clip(0.55*(def_rel - 1.0), -0.35, 0.60)
+
+    # Base xG comes from the attack quality scaled by league scoring level
+    base = atk_rel * league_mean_o
+
+    return max(0.2, base * mult + home_boost)
+
 def predict_row(home, away, df, draw_bias=0.1):
-    a = df.loc[df["Club"].str.lower()==home.lower()].iloc[0]
-    b = df.loc[df["Club"].str.lower()==away.lower()].iloc[0]
+    a = df.loc[df["Club"].str.casefold()==home.casefold()].iloc[0]
+    b = df.loc[df["Club"].str.casefold()==away.casefold()].iloc[0]
 
     # strengths
     s_diff = (a["S"] - b["S"])
-    o_vs_d_edge = (a["O"] - b["D"]) - (b["O"] - a["D"])  # how each attack matches the other's defense
+    o_vs_d_edge = (a["O"] - b["D"]) - (b["O"] - a["D"])
 
-    # 1X2 lean - improved logic for clear mismatches
-    if s_diff > 0.5:  # Clear home advantage
+    # 1X2 lean (unchanged)
+    if s_diff > 0.5:
         outcome = f"{a['Club']} win"
-    elif s_diff < -0.5:  # Clear away advantage
+    elif s_diff < -0.5:
         outcome = f"{b['Club']} win"
-    elif s_diff > 0.25 + draw_bias:  # Slight home advantage
+    elif s_diff > 0.25 + draw_bias:
         outcome = f"{a['Club']} win"
-    elif s_diff < -0.25 - draw_bias:  # Slight away advantage
+    elif s_diff < -0.25 - draw_bias:
         outcome = f"{b['Club']} win"
     else:
         outcome = "Draw"
 
-    # goals market - improved expected goals calculation
-    # Home advantage factor
-    home_advantage = 0.2
-    
-    # Expected goals based on attack vs defense matchup
-    # Fix the calculation to handle poor defenses properly
-    exp_home = max(1.0, a["O"] * (1.0 + max(0, 1.5 - b["D"])) + home_advantage)
-    exp_away = max(0.5, b["O"] * (1.0 + max(0, 1.5 - a["D"])))
-    gsum = exp_home + exp_away
+    # --- NEW expected goals ---
+    mean_o = df["O"].mean()
+    mean_d = df["D"].mean()
 
-    # Debug: Show expected goals in edges
+    exp_home = _exp_goals(a["O"], b["D"], mean_o, mean_d, home_boost=0.20)
+    exp_away = _exp_goals(b["O"], a["D"], mean_o, mean_d, home_boost=0.00)
+    gsum = exp_home + exp_away
     debug_goals = f"exp_home={exp_home:.2f}, exp_away={exp_away:.2f}, total={gsum:.2f}"
 
-    # Much lower threshold for Over 2.5
-    if gsum >= 2.5:
+    # Goals market (slightly tighter bands)
+    if gsum >= 2.65:
         goals = "Over 2.5"
-    elif gsum <= 2.0:
+    elif gsum <= 2.25:
         goals = "Under 2.5"
     else:
         goals = "Lean Over 2.5"
 
-    # BTTS logic - more nuanced and consistent with goals prediction
-    # Lower thresholds to be more realistic with our aggressive expected goals
-    home_scores_strong = exp_home > 1.0
-    away_scores_strong = exp_away > 1.0
-    home_scores_weak = exp_home > 0.6
-    away_scores_weak = exp_away > 0.6
-    
-    # More nuanced BTTS prediction
-    if home_scores_strong and away_scores_strong:
+    # BTTS aligned to xG, not too bullish
+    if exp_home >= 1.2 and exp_away >= 1.1:
         btts = "Yes"
-    elif home_scores_weak and away_scores_weak:
+    elif exp_home >= 0.9 and exp_away >= 0.9:
         btts = "Lean Yes"
-    elif (home_scores_strong and away_scores_weak) or (home_scores_weak and away_scores_strong):
+    elif exp_home >= 1.3 or exp_away >= 1.3:
         btts = "Lean No"
     else:
         btts = "No"
 
-    # Score prediction - show actual likely scores with variety
+    # (keep your score generator as-is)
     def get_score_predictions(exp_home, exp_away, is_over_25):
         # Main prediction - round expected goals
         main_home = max(0, round(exp_home))
@@ -255,9 +266,7 @@ def predict_row(home, away, df, draw_bias=0.1):
         
         return unique_scores
     
-    # Get varied score predictions
     score_predictions = get_score_predictions(exp_home, exp_away, goals == "Over 2.5")
-    
     if len(score_predictions) >= 3:
         score_hint = f"Most likely: {score_predictions[0]} | Also: {score_predictions[1]}, {score_predictions[2]}"
     elif len(score_predictions) == 2:
