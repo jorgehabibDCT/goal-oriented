@@ -20,7 +20,26 @@ AVAILABLE_LEAGUES = {
     "Portuguese Primeira Liga": "por.1",
     "Belgian Pro League": "bel.1",
     "Turkish Süper Lig": "tur.1",
-    "Russian Premier League": "rus.1"
+    "Russian Premier League": "rus.1",
+    "Scottish Premiership": "sco.1",
+    "Austrian Bundesliga": "aut.1",
+    "Swiss Super League": "sui.1"
+}
+
+# League strength factors for UEFA Champions League adjustments
+LEAGUE_STRENGTH = {
+    "English Premier League": 1.10,
+    "Spanish La Liga": 1.08,
+    "Italian Serie A": 1.05,
+    "German Bundesliga": 1.06,
+    "French Ligue 1": 1.02,
+    "Portuguese Primeira Liga": 0.99,
+    "Dutch Eredivisie": 0.98,
+    "Belgian Pro League": 0.92,
+    "Turkish Süper Lig": 0.91,
+    "Scottish Premiership": 0.90,
+    "Austrian Bundesliga": 0.92,
+    "Swiss Super League": 0.90,
 }
 
 def _choose(v, *keys, default=None):
@@ -152,6 +171,59 @@ def _exp_goals(att_o, opp_d, league_mean_o, league_mean_d, home_boost=0.15):
 
     return max(0.2, base * mult + home_boost)
 
+def adjust_to_ucl(O, D, muO_league, muD_league, league_name, muO_ucl, muD_ucl, alpha=1.0, beta=1.0):
+    """
+    Adjust team performance from domestic league to UEFA Champions League level.
+    
+    Args:
+        O, D: Team's offensive and defensive performance in domestic league
+        muO_league, muD_league: League means for offensive and defensive performance
+        league_name: Name of the domestic league
+        muO_ucl, muD_ucl: UEFA Champions League means for offensive and defensive performance
+        alpha, beta: Adjustment parameters for attack and defense
+    
+    Returns:
+        O_ucl, D_ucl: Adjusted offensive and defensive performance for UCL level
+    """
+    lsf = LEAGUE_STRENGTH.get(league_name, 1.00)
+    atk_rel = O / max(1e-6, muO_league)
+    def_rel = D / max(1e-6, muD_league)
+
+    atk_ucl = atk_rel / (lsf ** alpha)
+    def_ucl = def_rel * (lsf ** beta)
+
+    O_ucl = atk_ucl * muO_ucl
+    D_ucl = def_ucl * muD_ucl
+    return O_ucl, D_ucl
+
+def exp_goals_ucl(teamA, teamB, dfA, dfB, leagueA, leagueB, muO_ucl, muD_ucl, lambda_shrink=0.6, home_boost=0.12):
+    """
+    Calculate expected goals for UEFA Champions League match between teams from different leagues.
+    
+    Args:
+        teamA, teamB: Team names
+        dfA, dfB: DataFrames containing team performance data with O, D, muO, muD columns
+        leagueA, leagueB: League names for each team
+        muO_ucl, muD_ucl: UEFA Champions League means
+        lambda_shrink: Shrinkage factor toward global mean
+        home_boost: Home advantage boost
+    
+    Returns:
+        xh, xa: Expected goals for home and away teams
+    """
+    # Adjust team performance to UCL level
+    Oa_ucl, Da_ucl = adjust_to_ucl(dfA.O, dfA.D, dfA.muO, dfA.muD, leagueA, muO_ucl, muD_ucl)
+    Ob_ucl, Db_ucl = adjust_to_ucl(dfB.O, dfB.D, dfB.muO, dfB.muD, leagueB, muO_ucl, muD_ucl)
+
+    # Calculate expected goals
+    xh = _exp_goals(Oa_ucl, Db_ucl, muO_ucl, muD_ucl, home_boost=home_boost)
+    xa = _exp_goals(Ob_ucl, Da_ucl, muO_ucl, muD_ucl, home_boost=0.0)
+
+    # Shrink toward global mean for stability
+    xh = lambda_shrink*xh + (1-lambda_shrink)*muO_ucl
+    xa = lambda_shrink*xa + (1-lambda_shrink)*muO_ucl
+    return xh, xa
+
 import math
 
 def _poisson_pmf(lmbda, k):
@@ -258,6 +330,100 @@ def predict_row(home, away, df, draw_bias=0.1):
             f"SΔ={s_diff:+.2f}, O_vs_DΔ={o_vs_d_edge:+.2f}, "
             f"exp_home={exp_home:.2f}, exp_away={exp_away:.2f}, "
             f"P(H)= {agg['ph_win']:.2%}, P(D)= {agg['p_draw']:.2%}, P(A)= {agg['pa_win']:.2%}, "
+            f"P(Over2.5)= {p_over:.2%}, P(BTTS)= {p_btts:.2%}"
+        ),
+    }
+
+def predict_row_ucl(home_team, away_team, df_home, df_away, league_home, league_away, draw_bias=0.1):
+    """
+    Predict UEFA Champions League match between teams from different leagues.
+    
+    Args:
+        home_team, away_team: Team names
+        df_home, df_away: DataFrames containing team performance data
+        league_home, league_away: League names for each team
+        draw_bias: Bias toward draw predictions
+    
+    Returns:
+        Dictionary with prediction results
+    """
+    # Get team data
+    a = df_home.loc[df_home["Club"].str.casefold() == home_team.casefold()].iloc[0]
+    b = df_away.loc[df_away["Club"].str.casefold() == away_team.casefold()].iloc[0]
+
+    # UEFA Champions League means (typical values for elite competition)
+    muO_ucl = 1.4  # Expected goals per match in UCL
+    muD_ucl = 1.4  # Expected goals conceded per match in UCL
+    
+    # Calculate expected goals using UCL adjustment
+    exp_home, exp_away = exp_goals_ucl(home_team, away_team, a, b, league_home, league_away, muO_ucl, muD_ucl)
+    
+    # Calculate score probabilities
+    agg = _score_probs(exp_home, exp_away, cap=6)
+    
+    # Adjust for draw bias
+    agg["p_draw"] = min(0.35, agg["p_draw"] + draw_bias)
+    agg["ph_win"] = agg["ph_win"] * (1 - draw_bias/2)
+    agg["pa_win"] = agg["pa_win"] * (1 - draw_bias/2)
+    
+    # Normalize probabilities
+    total = agg["ph_win"] + agg["p_draw"] + agg["pa_win"]
+    agg["ph_win"] /= total
+    agg["p_draw"] /= total
+    agg["pa_win"] /= total
+
+    # Determine outcomes
+    trio = [("Draw", agg["p_draw"]), (f"{a['Club']} win", agg["ph_win"]), (f"{b['Club']} win", agg["pa_win"])]
+    trio.sort(key=lambda x: x[1], reverse=True)
+    outcome, p_outcome = trio[0]
+    
+    margin = p_outcome - trio[1][1]
+    if margin < 0.05:
+        outcome = "Draw" if outcome == "Draw" else f"Lean {outcome}"
+
+    # Goals market
+    p_over = agg["p_over25"]
+    if p_over >= 0.58:
+        goals = "Over 2.5"
+    elif p_over <= 0.42:
+        goals = "Under 2.5"
+    else:
+        goals = "Lean Over 2.5"
+
+    # BTTS
+    p_btts = agg["p_btts"]
+    if p_btts >= 0.58:
+        btts = "Yes"
+    elif p_btts <= 0.42:
+        btts = "No"
+    else:
+        btts = "Lean Yes" if p_btts > 0.5 else "Lean No"
+
+    # Scorelines
+    top = agg["top_scores"]
+    score_hint = f"Most likely: {top[0]}" + (f" | Also: {', '.join(top[1:])}" if len(top) > 1 else "")
+    
+    # League strength info
+    lsf_home = LEAGUE_STRENGTH.get(league_home, 1.00)
+    lsf_away = LEAGUE_STRENGTH.get(league_away, 1.00)
+    league_strength_info = f"League strength: {league_home} ({lsf_home:.2f}) vs {league_away} ({lsf_away:.2f})"
+
+    return {
+        "Fixture": f"{a['Club']} vs {b['Club']}",
+        "League (Home)": league_home,
+        "League (Away)": league_away,
+        "Home tier": a["Tier"],
+        "Away tier": b["Tier"],
+        "Style (Home)": a["Style"],
+        "Style (Away)": b["Style"],
+        "1X2 lean": outcome,
+        "Goals": goals,
+        "BTTS": btts,
+        "Score range": score_hint,
+        "UCL xG": f"Home: {exp_home:.2f}, Away: {exp_away:.2f}",
+        "Probabilities": f"P(H)= {agg['ph_win']:.2%}, P(D)= {agg['p_draw']:.2%}, P(A)= {agg['pa_win']:.2%}",
+        "League Strength": league_strength_info,
+        "Edges": (
             f"P(Over2.5)= {p_over:.2%}, P(BTTS)= {p_btts:.2%}"
         ),
     }
@@ -374,6 +540,111 @@ for line in fixtures_text.splitlines():
         if h and a:
             fixtures.append((h, a))
 
+# UEFA Champions League Section
+with st.expander("🏆 UEFA Champions League Cross-League Predictions", expanded=False):
+    st.markdown("**Compare teams from different leagues using league strength adjustments**")
+    
+    # Check if we have any standings data
+    available_leagues = []
+    if 'standings_df' in st.session_state:
+        available_leagues.append((st.session_state.league_name, st.session_state.standings_df))
+    
+    # Add any previously loaded UCL leagues
+    for key, value in st.session_state.items():
+        if key.startswith('ucl_league_'):
+            league_name = key.replace('ucl_league_', '')
+            if league_name not in [league[0] for league in available_leagues]:
+                available_leagues.append((league_name, value))
+    
+    # Allow users to load multiple leagues for UCL comparisons
+    st.markdown("**Load additional leagues for cross-league comparisons:**")
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        additional_league = st.selectbox("Load additional league:", [""] + [name for name in AVAILABLE_LEAGUES.keys() 
+                                                                          if name not in [league[0] for league in available_leagues]])
+    
+    with col2:
+        if st.button("Load League", type="secondary"):
+            if additional_league:
+                with st.spinner(f"Loading {additional_league}..."):
+                    df, league_name = fetch_league_standings(additional_league)
+                    if df is not None:
+                        df = compute_table(df)
+                        available_leagues.append((league_name, df))
+                        st.session_state[f'ucl_league_{league_name}'] = df
+                        st.success(f"{league_name} loaded for UCL comparisons!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to load league data.")
+    
+    # Display loaded leagues
+    if len(available_leagues) >= 2:
+        st.markdown("**Available leagues for UCL predictions:**")
+        league_names = [league[0] for league in available_leagues]
+        st.info(f"Loaded: {', '.join(league_names)}")
+        
+        # UCL Fixture Creation
+        st.markdown("**Create UEFA Champions League Fixtures:**")
+        
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+        
+        with col1:
+            home_league = st.selectbox("Home Team League:", league_names, key="ucl_home_league")
+        
+        with col2:
+            if home_league:
+                home_league_df = next(league[1] for league in available_leagues if league[0] == home_league)
+                home_teams = sorted(home_league_df['Club'].tolist())
+                home_team = st.selectbox("Home Team:", [""] + home_teams, key="ucl_home_team")
+        
+        with col3:
+            away_league = st.selectbox("Away Team League:", [name for name in league_names if name != home_league], key="ucl_away_league")
+        
+        with col4:
+            if away_league:
+                away_league_df = next(league[1] for league in available_leagues if league[0] == away_league)
+                away_teams = sorted(away_league_df['Club'].tolist())
+                away_team = st.selectbox("Away Team:", [""] + away_teams, key="ucl_away_team")
+        
+        if st.button("Add UCL Fixture", type="primary"):
+            if home_team and away_team and home_league and away_league:
+                if 'ucl_fixtures_list' not in st.session_state:
+                    st.session_state.ucl_fixtures_list = []
+                fixture_info = {
+                    'home_team': home_team,
+                    'away_team': away_team,
+                    'home_league': home_league,
+                    'away_league': away_league
+                }
+                st.session_state.ucl_fixtures_list.append(fixture_info)
+                st.success(f"Added UCL fixture: {home_team} ({home_league}) vs {away_team} ({away_league})")
+            else:
+                st.error("Please select both teams and leagues!")
+        
+        # Display UCL fixtures
+        if 'ucl_fixtures_list' in st.session_state and st.session_state.ucl_fixtures_list:
+            st.markdown("**UCL Fixtures:**")
+            for i, fixture in enumerate(st.session_state.ucl_fixtures_list):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.write(f"{i+1}. {fixture['home_team']} ({fixture['home_league']}) vs {fixture['away_team']} ({fixture['away_league']})")
+                with col2:
+                    if st.button("Remove", key=f"ucl_remove_{i}"):
+                        st.session_state.ucl_fixtures_list.pop(i)
+                        st.rerun()
+            
+            # Clear all UCL fixtures
+            if st.button("Clear All UCL Fixtures"):
+                st.session_state.ucl_fixtures_list = []
+                st.rerun()
+    
+    elif len(available_leagues) == 1:
+        st.info("Load at least 2 different leagues to create UEFA Champions League predictions.")
+    
+    else:
+        st.warning("Please load at least 2 different leagues to use UEFA Champions League predictions.")
+
 st.markdown("---")
 st.subheader("Predictions")
 
@@ -400,3 +671,58 @@ else:
 
 if missing:
     st.warning("Not found teams: " + ", ".join(missing))
+
+# UEFA Champions League Predictions Section
+if 'ucl_fixtures_list' in st.session_state and st.session_state.ucl_fixtures_list:
+    st.markdown("---")
+    st.subheader("🏆 UEFA Champions League Predictions")
+    
+    ucl_rows = []
+    ucl_missing = []
+    
+    # Get all loaded leagues
+    all_leagues = {}
+    if 'standings_df' in st.session_state:
+        all_leagues[st.session_state.league_name] = st.session_state.standings_df
+    
+    # Add any additional UCL leagues
+    for key, value in st.session_state.items():
+        if key.startswith('ucl_league_'):
+            league_name = key.replace('ucl_league_', '')
+            all_leagues[league_name] = value
+    
+    for fixture in st.session_state.ucl_fixtures_list:
+        try:
+            home_team = fixture['home_team']
+            away_team = fixture['away_team']
+            home_league = fixture['home_league']
+            away_league = fixture['away_league']
+            
+            df_home = all_leagues[home_league]
+            df_away = all_leagues[away_league]
+            
+            prediction = predict_row_ucl(home_team, away_team, df_home, df_away, home_league, away_league)
+            ucl_rows.append(prediction)
+            
+        except Exception as e:
+            ucl_missing.append(f"{fixture['home_team']} ({fixture['home_league']}) vs {fixture['away_team']} ({fixture['away_league']})")
+    
+    if ucl_rows:
+        ucl_pred_df = pd.DataFrame(ucl_rows)
+        st.dataframe(ucl_pred_df, width='stretch')
+        
+        # Download button for UCL predictions
+        ucl_csv = ucl_pred_df.to_csv(index=False).encode("utf-8")
+        st.download_button("Download UCL predictions (CSV)", ucl_csv, "ucl_predictions.csv", "text/csv")
+        
+        # League strength comparison
+        st.markdown("**League Strength Factors:**")
+        strength_df = pd.DataFrame([
+            {"League": league, "Strength Factor": factor}
+            for league, factor in LEAGUE_STRENGTH.items()
+        ])
+        strength_df = strength_df.sort_values("Strength Factor", ascending=False)
+        st.dataframe(strength_df, width='stretch')
+        
+    if ucl_missing:
+        st.warning("UCL fixtures with issues: " + ", ".join(ucl_missing))
