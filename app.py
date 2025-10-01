@@ -308,7 +308,7 @@ def predict_row(home, away, df, draw_bias=0.1):
     elif p_over <= 0.42:
         goals = "Under 2.5"
     else:
-        goals = "Lean Over 2.5"
+        goals = "Lean Over 2.5" if p_over > 0.5 else "Lean Under 2.5"
 
     # BTTS from p(BTTS)
     p_btts = agg["p_btts"]
@@ -395,7 +395,7 @@ def predict_row_ucl(home_team, away_team, df_home, df_away, league_home, league_
     elif p_over <= 0.42:
         goals = "Under 2.5"
     else:
-        goals = "Lean Over 2.5"
+        goals = "Lean Over 2.5" if p_over > 0.5 else "Lean Under 2.5"
 
     # BTTS
     p_btts = agg["p_btts"]
