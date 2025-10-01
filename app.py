@@ -27,19 +27,20 @@ AVAILABLE_LEAGUES = {
 }
 
 # League strength factors for UEFA Champions League adjustments
+# Expanded separation to better reflect real league quality differences
 LEAGUE_STRENGTH = {
-    "English Premier League": 1.10,
-    "Spanish La Liga": 1.08,
-    "Italian Serie A": 1.05,
-    "German Bundesliga": 1.06,
-    "French Ligue 1": 1.02,
-    "Portuguese Primeira Liga": 0.99,
-    "Dutch Eredivisie": 0.98,
-    "Belgian Pro League": 0.92,
-    "Turkish Süper Lig": 0.91,
-    "Scottish Premiership": 0.90,
-    "Austrian Bundesliga": 0.92,
-    "Swiss Super League": 0.90,
+    "English Premier League": 1.25,  # Elite tier - strongest league
+    "Spanish La Liga": 1.20,         # Elite tier - historically strong
+    "German Bundesliga": 1.15,       # Elite tier - very competitive
+    "Italian Serie A": 1.10,         # Elite tier - tactical league
+    "French Ligue 1": 1.00,          # Top tier - baseline reference
+    "Portuguese Primeira Liga": 0.85, # Strong tier - good European record
+    "Dutch Eredivisie": 0.80,        # Strong tier - development league
+    "Belgian Pro League": 0.70,      # Mid tier - developing
+    "Turkish Süper Lig": 0.65,       # Mid tier - passionate but inconsistent
+    "Scottish Premiership": 0.60,    # Mid tier - Celtic/Rangers dominance
+    "Austrian Bundesliga": 0.60,     # Mid tier - smaller market
+    "Swiss Super League": 0.55,      # Lower tier - smaller league
 }
 
 def _choose(v, *keys, default=None):
@@ -171,7 +172,7 @@ def _exp_goals(att_o, opp_d, league_mean_o, league_mean_d, home_boost=0.15):
 
     return max(0.2, base * mult + home_boost)
 
-def adjust_to_ucl(O, D, muO_league, muD_league, league_name, muO_ucl, muD_ucl, alpha=1.0, beta=1.0):
+def adjust_to_ucl(O, D, muO_league, muD_league, league_name, muO_ucl, muD_ucl, alpha=1.5, beta=1.5):
     """
     Adjust team performance from domestic league to UEFA Champions League level.
     
@@ -196,7 +197,7 @@ def adjust_to_ucl(O, D, muO_league, muD_league, league_name, muO_ucl, muD_ucl, a
     D_ucl = def_ucl * muD_ucl
     return O_ucl, D_ucl
 
-def exp_goals_ucl(teamA, teamB, teamA_data, teamB_data, leagueA, leagueB, leagueA_df, leagueB_df, muO_ucl, muD_ucl, lambda_shrink=0.6, home_boost=0.12):
+def exp_goals_ucl(teamA, teamB, teamA_data, teamB_data, leagueA, leagueB, leagueA_df, leagueB_df, muO_ucl, muD_ucl, lambda_shrink=0.3, home_boost=0.12):
     """
     Calculate expected goals for UEFA Champions League match between teams from different leagues.
     
