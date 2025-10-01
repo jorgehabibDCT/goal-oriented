@@ -701,11 +701,22 @@ if 'ucl_fixtures_list' in st.session_state and st.session_state.ucl_fixtures_lis
             df_home = all_leagues[home_league]
             df_away = all_leagues[away_league]
             
+            # Check if teams exist in their respective leagues
+            home_teams = df_home['Club'].str.casefold().tolist()
+            away_teams = df_away['Club'].str.casefold().tolist()
+            
+            if home_team.casefold() not in home_teams:
+                raise ValueError(f"Team '{home_team}' not found in {home_league}. Available teams: {', '.join(df_home['Club'].tolist()[:5])}...")
+            
+            if away_team.casefold() not in away_teams:
+                raise ValueError(f"Team '{away_team}' not found in {away_league}. Available teams: {', '.join(df_away['Club'].tolist()[:5])}...")
+            
             prediction = predict_row_ucl(home_team, away_team, df_home, df_away, home_league, away_league)
             ucl_rows.append(prediction)
             
         except Exception as e:
-            ucl_missing.append(f"{fixture['home_team']} ({fixture['home_league']}) vs {fixture['away_team']} ({fixture['away_league']})")
+            error_msg = f"{fixture['home_team']} ({fixture['home_league']}) vs {fixture['away_team']} ({fixture['away_league']}) - Error: {str(e)}"
+            ucl_missing.append(error_msg)
     
     if ucl_rows:
         ucl_pred_df = pd.DataFrame(ucl_rows)
@@ -725,4 +736,17 @@ if 'ucl_fixtures_list' in st.session_state and st.session_state.ucl_fixtures_lis
         st.dataframe(strength_df, width='stretch')
         
     if ucl_missing:
-        st.warning("UCL fixtures with issues: " + ", ".join(ucl_missing))
+        st.warning("UCL fixtures with issues:")
+        for missing in ucl_missing:
+            st.error(missing)
+        
+        # Show available teams for debugging
+        st.markdown("**Available teams by league:**")
+        for league_name, df in all_leagues.items():
+            with st.expander(f"{league_name} ({len(df)} teams)"):
+                teams_list = df['Club'].tolist()
+                # Show in columns for better readability
+                cols = st.columns(3)
+                for i, team in enumerate(teams_list):
+                    with cols[i % 3]:
+                        st.write(f"• {team}")
