@@ -196,14 +196,15 @@ def adjust_to_ucl(O, D, muO_league, muD_league, league_name, muO_ucl, muD_ucl, a
     D_ucl = def_ucl * muD_ucl
     return O_ucl, D_ucl
 
-def exp_goals_ucl(teamA, teamB, dfA, dfB, leagueA, leagueB, muO_ucl, muD_ucl, lambda_shrink=0.6, home_boost=0.12):
+def exp_goals_ucl(teamA, teamB, teamA_data, teamB_data, leagueA, leagueB, leagueA_df, leagueB_df, muO_ucl, muD_ucl, lambda_shrink=0.6, home_boost=0.12):
     """
     Calculate expected goals for UEFA Champions League match between teams from different leagues.
     
     Args:
         teamA, teamB: Team names
-        dfA, dfB: DataFrames containing team performance data with O, D, muO, muD columns
+        teamA_data, teamB_data: Individual team data (Series) with O, D columns
         leagueA, leagueB: League names for each team
+        leagueA_df, leagueB_df: Full league DataFrames to calculate means
         muO_ucl, muD_ucl: UEFA Champions League means
         lambda_shrink: Shrinkage factor toward global mean
         home_boost: Home advantage boost
@@ -211,9 +212,15 @@ def exp_goals_ucl(teamA, teamB, dfA, dfB, leagueA, leagueB, muO_ucl, muD_ucl, la
     Returns:
         xh, xa: Expected goals for home and away teams
     """
+    # Calculate league means
+    muO_leagueA = leagueA_df["O"].mean()
+    muD_leagueA = leagueA_df["D"].mean()
+    muO_leagueB = leagueB_df["O"].mean()
+    muD_leagueB = leagueB_df["D"].mean()
+    
     # Adjust team performance to UCL level
-    Oa_ucl, Da_ucl = adjust_to_ucl(dfA.O, dfA.D, dfA.muO, dfA.muD, leagueA, muO_ucl, muD_ucl)
-    Ob_ucl, Db_ucl = adjust_to_ucl(dfB.O, dfB.D, dfB.muO, dfB.muD, leagueB, muO_ucl, muD_ucl)
+    Oa_ucl, Da_ucl = adjust_to_ucl(teamA_data.O, teamA_data.D, muO_leagueA, muD_leagueA, leagueA, muO_ucl, muD_ucl)
+    Ob_ucl, Db_ucl = adjust_to_ucl(teamB_data.O, teamB_data.D, muO_leagueB, muD_leagueB, leagueB, muO_ucl, muD_ucl)
 
     # Calculate expected goals
     xh = _exp_goals(Oa_ucl, Db_ucl, muO_ucl, muD_ucl, home_boost=home_boost)
@@ -356,7 +363,7 @@ def predict_row_ucl(home_team, away_team, df_home, df_away, league_home, league_
     muD_ucl = 1.4  # Expected goals conceded per match in UCL
     
     # Calculate expected goals using UCL adjustment
-    exp_home, exp_away = exp_goals_ucl(home_team, away_team, a, b, league_home, league_away, muO_ucl, muD_ucl)
+    exp_home, exp_away = exp_goals_ucl(home_team, away_team, a, b, league_home, league_away, df_home, df_away, muO_ucl, muD_ucl)
     
     # Calculate score probabilities
     agg = _score_probs(exp_home, exp_away, cap=6)
